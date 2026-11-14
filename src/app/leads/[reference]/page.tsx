@@ -1,206 +1,309 @@
-'use client';
-import * as React from 'react';
-import { Suspense } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { PageHeader } from '@/components/layout/PageHeader';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { Select } from '@/components/ui/Select';
-import { Modal } from '@/components/ui/Modal';
-import { Skeleton } from '@/components/ui/Skeleton';
-import { LeadForm } from '@/components/lead/LeadForm';
-import { useToast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
-import type { Lead, LeadInput, Person } from '@/lib/types';
-import { STAGE_LABELS, PRIORITY_LABELS, SOURCE_LABELS } from '@/lib/types';
+import { getLead } from '@/actions/leads';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/shadcn/card';
+import { Badge } from '@/components/ui/shadcn/badge';
+import { Button } from '@/components/ui/shadcn/button';
+import { formatCurrency, formatDate, getStageColor, getPriorityColor } from '@/lib/utils';
+import { Edit, Trash2, ArrowLeft, User, Mail, Phone, MapPin, DollarSign, Calendar, Clock } from 'lucide-react';
+import Link from 'next/link';
 
-function LeadDetailContent() {
-  const params = useParams<{ reference: string }>();
-  const toast = useToast();
-  const router = useRouter();
-  const ref = decodeURIComponent(params.reference);
-  const [lead, setLead] = React.useState<Lead | null>(null);
-  const [people, setPeople] = React.useState<Person[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [editing, setEditing] = React.useState(false);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [stage, setStage] = React.useState('');
+interface LeadPageProps {
+  params: Promise<{ reference: string }>;
+}
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const [l, p] = await Promise.all([api.getLead(ref), api.people()]);
-      setLead(l.lead);
-      setPeople(p.people);
-      setStage(l.lead.stage);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, [ref]);
+export default async function LeadDetailPage({ params }: LeadPageProps) {
+  const { reference } = await params;
+  const result = await getLead(reference);
 
-  React.useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
-
-  const handleStageChange = async (newStage: string) => {
-    if (!lead) return;
-    try {
-      await api.updateLead(lead.reference, { stage: newStage });
-      toast.add({ variant: 'success', title: `Moved to ${newStage}` });
-      await load();
-    } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not update stage', description: e instanceof Error ? e.message : '' });
-    }
-  };
-
-  const handleUpdate = async (input: LeadInput) => {
-    if (!lead) return;
-    setSubmitting(true);
-    try {
-      await api.updateLead(lead.reference, input);
-      setEditing(false);
-      toast.add({ variant: 'success', title: 'Lead updated' });
-      await load();
-    } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not update lead', description: e instanceof Error ? e.message : '' });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleConvert = async () => {
-    if (!lead) return;
-    try {
-      const { customer } = await api.convertLead(lead.reference);
-      toast.add({ variant: 'success', title: 'Converted to customer' });
-      router.push(`/customers/${customer.reference}`);
-    } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not convert lead', description: e instanceof Error ? e.message : '' });
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!lead) return;
-    if (!confirm('Delete this lead?')) return;
-    try {
-      await api.deleteLead(lead.reference);
-      toast.add({ variant: 'success', title: 'Lead deleted' });
-      router.push('/leads');
-    } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not delete lead', description: e instanceof Error ? e.message : '' });
-    }
-  };
-
-  if (loading) return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
-      <Skeleton className="mb-4 h-8 w-48" />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Skeleton className="h-64 lg:col-span-2" />
-        <Skeleton className="h-64" />
+  if (!result.lead) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        <Card className="max-w-md mx-auto text-center">
+          <CardContent className="py-12">
+            <h2 className="text-xl font-bold text-slate-900">Lead not found</h2>
+            <p className="mt-2 text-slate-600">The lead you're looking for doesn't exist.</p>
+            <Link href="/leads" className="mt-4 inline-block">
+              <Button variant="outline">Back to Leads</Button>
+            </Link>
+          </CardContent>
+        </Card>
       </div>
-    </div>
-  );
-  if (!lead) return <div className="mx-auto max-w-7xl px-4 py-6 text-slate-500">Lead not found.</div>;
+    );
+  }
+
+  const lead = result.lead;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-      <PageHeader
-        title={lead.name}
-        description={`${lead.reference} · ${lead.city || ''} ${lead.country || ''}`}
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
-            <Button onClick={handleConvert}>Convert to Customer</Button>
-            <Button variant="danger" onClick={handleDelete}>Delete</Button>
+      {/* Header */}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <Link href="/leads" className="text-slate-500 hover:text-slate-700">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">{lead.name}</h1>
+            <div className="flex items-center gap-3 mt-1">
+              <Badge variant="outline" className={getStageColor(lead.stage)}>
+                {lead.stage.charAt(0).toUpperCase() + lead.stage.slice(1)}
+              </Badge>
+              <Badge variant="outline" className={getPriorityColor(lead.priority)}>
+                {lead.priority.charAt(0).toUpperCase() + lead.priority.slice(1)}
+              </Badge>
+            </div>
           </div>
-        }
-      />
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          <Card>
-            <CardHeader><h2 className="font-semibold text-slate-800">Details</h2></CardHeader>
-            <CardBody>
-              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div><dt className="text-xs uppercase text-slate-500">Stage</dt><dd className="mt-1"><Badge tone={lead.stage}>{STAGE_LABELS[lead.stage]}</Badge></dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Priority</dt><dd className="mt-1"><Badge tone={lead.priority}>{PRIORITY_LABELS[lead.priority]}</Badge></dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Source</dt><dd className="mt-1 text-sm text-slate-700">{SOURCE_LABELS[lead.source] ?? lead.source}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Category</dt><dd className="mt-1 text-sm text-slate-700">{lead.category || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Estimated Value</dt><dd className="mt-1 text-sm text-slate-700">${lead.estimatedValue.toLocaleString()}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Score</dt><dd className="mt-1 text-sm text-slate-700">{lead.score}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Assigned To</dt><dd className="mt-1 text-sm text-slate-700">{lead.assignedToName || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Team</dt><dd className="mt-1 text-sm text-slate-700">{lead.assignedTeam || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Follow-up</dt><dd className="mt-1 text-sm text-slate-700">{lead.followUpDate || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Reminder</dt><dd className="mt-1 text-sm text-slate-700">{lead.reminderDays} days</dd></div>
-              </dl>
-              {lead.notes && (
-                <div className="mt-4">
-                  <dt className="text-xs uppercase text-slate-500">Notes</dt>
-                  <dd className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{lead.notes}</dd>
-                </div>
-              )}
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader><h2 className="font-semibold text-slate-800">Contact</h2></CardHeader>
-            <CardBody>
-              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div><dt className="text-xs uppercase text-slate-500">Name</dt><dd className="mt-1 text-sm text-slate-700">{lead.contactName || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Role</dt><dd className="mt-1 text-sm text-slate-700">{lead.contactRole || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Email</dt><dd className="mt-1 text-sm text-slate-700">{lead.contactEmail || '—'}</dd></div>
-                <div><dt className="text-xs uppercase text-slate-500">Phone</dt><dd className="mt-1 text-sm text-slate-700">{lead.contactPhone || '—'}</dd></div>
-              </dl>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader><h2 className="font-semibold text-slate-800">Move Stage</h2></CardHeader>
-            <CardBody>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Select value={stage} onChange={(e) => setStage(e.target.value)} className="sm:max-w-xs">
-                  {Object.entries(STAGE_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
-                  ))}
-                </Select>
-                <Button onClick={() => handleStageChange(stage)} disabled={stage === lead.stage}>Update Stage</Button>
-              </div>
-            </CardBody>
-          </Card>
         </div>
-
-        <div>
-          <Card>
-            <CardHeader><h2 className="font-semibold text-slate-800">Activity</h2></CardHeader>
-            <CardBody>
-              <ul className="space-y-3">
-                {lead.activities.map((a) => (
-                  <li key={a.id} className="border-l-2 border-blue-200 pl-3">
-                    <div className="text-sm font-medium text-slate-800">{a.summary}</div>
-                    <div className="text-xs text-slate-500">{a.kind} · {new Date(a.createdAt).toLocaleString()}</div>
-                  </li>
-                ))}
-                {lead.activities.length === 0 && <li className="text-sm text-slate-400">No activity yet.</li>}
-              </ul>
-            </CardBody>
-          </Card>
+        <div className="flex gap-2">
+          <Link href={`/leads/${lead.reference}/edit`}>
+            <Button variant="outline" leftIcon={<Edit className="h-4 w-4" />}>
+              Edit
+            </Button>
+          </Link>
+          <Button variant="ghost" leftIcon={<Trash2 className="h-4 w-4" />} className="text-rose-600 hover:bg-rose-50">
+            Delete
+          </Button>
         </div>
       </div>
 
-      <Modal open={editing} onClose={() => setEditing(false)} title="Edit Lead">
-        <LeadForm initial={lead} people={people} submitting={submitting} onSubmit={handleUpdate} onCancel={() => setEditing(false)} />
-      </Modal>
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Main Info */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Contact Info */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Contact Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(lead.contactName || lead.contactEmail || lead.contactPhone) && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {lead.contactName && (
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                      <User className="h-5 w-5 text-slate-400" />
+                      <div>
+                        <p className="text-xs text-slate-500">Contact Name</p>
+                        <p className="font-medium">{lead.contactName}</p>
+                      </div>
+                    </div>
+                  )}
+                  {lead.contactRole && (
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                      <User className="h-5 w-5 text-slate-400" />
+                      <div>
+                        <p className="text-xs text-slate-500">Role</p>
+                        <p className="font-medium">{lead.contactRole}</p>
+                      </div>
+                    </div>
+                  )}
+                  {lead.contactEmail && (
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                      <Mail className="h-5 w-5 text-slate-400" />
+                      <div>
+                        <p className="text-xs text-slate-500">Email</p>
+                        <p className="font-medium">{lead.contactEmail}</p>
+                      </div>
+                    </div>
+                  )}
+                  {lead.contactPhone && (
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                      <Phone className="h-5 w-5 text-slate-400" />
+                      <div>
+                        <p className="text-xs text-slate-500">Phone</p>
+                        <p className="font-medium">{lead.contactPhone}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Location & Source */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Location & Source</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {lead.city && (
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                    <MapPin className="h-5 w-5 text-slate-400" />
+                    <div>
+                      <p className="text-xs text-slate-500">City</p>
+                      <p className="font-medium">{lead.city}{lead.country ? `, ${lead.country}` : ''}</p>
+                    </div>
+                  </div>
+                )}
+                {lead.country && !lead.city && (
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                    <MapPin className="h-5 w-5 text-slate-400" />
+                    <div>
+                      <p className="text-xs text-slate-500">Country</p>
+                      <p className="font-medium">{lead.country}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                  <DollarSign className="h-5 w-5 text-slate-400" />
+                  <div>
+                    <p className="text-xs text-slate-500">Estimated Value</p>
+                    <p className="font-medium text-lg">{formatCurrency(lead.estimatedValue || 0)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                  <Calendar className="h-5 w-5 text-slate-400" />
+                  <div>
+                    <p className="text-xs text-slate-500">Source</p>
+                    <p className="font-medium capitalize">{lead.source?.replace('_', ' ') || '—'}</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Details */}
+          {(lead.category || lead.assignedToName || lead.assignedTeam || lead.notes) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {lead.category && (
+                    <div>
+                      <p className="text-xs text-slate-500">Category</p>
+                      <p className="font-medium">{lead.category}</p>
+                    </div>
+                  )}
+                  {lead.assignedToName && (
+                    <div>
+                      <p className="text-xs text-slate-500">Assigned To</p>
+                      <p className="font-medium">{lead.assignedToName}</p>
+                    </div>
+                  )}
+                  {lead.assignedTeam && (
+                    <div>
+                      <p className="text-xs text-slate-500">Team</p>
+                      <p className="font-medium">{lead.assignedTeam}</p>
+                    </div>
+                  )}
+                  {lead.followUpDate && (
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-slate-400" />
+                      <div>
+                        <p className="text-xs text-slate-500">Follow Up</p>
+                        <p className="font-medium">{formatDate(lead.followUpDate)}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {lead.notes && (
+                  <div>
+                    <p className="text-xs text-slate-500">Notes</p>
+                    <p className="mt-1 whitespace-pre-wrap">{lead.notes}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Activities */}
+          {lead.activities && lead.activities.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent Activities</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {lead.activities.slice(0, 10).map((activity, index) => (
+                    <div key={index} className="flex gap-3 p-3 border border-slate-200 rounded-lg">
+                      <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-brand-500" />
+                      <div className="flex-1">
+                        <p className="font-medium">{activity.summary}</p>
+                        <p className="text-xs text-slate-500">
+                          {activity.kind} • {activity.actor} • {formatDate(activity.createdAt)}
+                        </p>
+                        {activity.outcome && (
+                          <p className="text-xs text-slate-600 mt-1">Outcome: {activity.outcome}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Quick Stats */}
+          <Card>
+            <CardContent className="pt-6">
+              <dl className="space-y-4">
+                <div className="flex justify-between">
+                  <dt className="text-sm text-slate-500">Reference</dt>
+                  <dd className="font-mono font-medium">{lead.reference}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-sm text-slate-500">Score</dt>
+                  <dd className="font-medium">{lead.score}/100</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-sm text-slate-500">Reminder</dt>
+                  <dd className="font-medium">{lead.reminderDays} days</dd>
+                </div>
+                {lead.convertedAt && (
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-slate-500">Converted</dt>
+                    <dd className="font-medium">{formatDate(lead.convertedAt)}</dd>
+                  </div>
+                )}
+                {lead.lostReason && (
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-slate-500">Lost Reason</dt>
+                    <dd className="font-medium text-rose-600">{lead.lostReason}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <dt className="text-sm text-slate-500">Created</dt>
+                  <dd className="font-medium">{formatDate(lead.createdAt)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-sm text-slate-500">Updated</dt>
+                  <dd className="font-medium">{formatDate(lead.updatedAt)}</dd>
+                </div>
+              </dl>
+            </CardContent>
+          </Card>
+
+          {/* Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Link href={`/leads/${lead.reference}/edit`} className="block">
+                <Button variant="outline" className="w-full justify-start" leftIcon={<Edit className="h-4 w-4" />}>
+                  Edit Lead
+                </Button>
+              </Link>
+              {lead.stage !== 'won' && lead.stage !== 'lost' && (
+                <Button variant="default" className="w-full justify-start" onClick={() => {}}>
+                  Convert to Customer
+                </Button>
+              )}
+              <Button variant="outline" className="w-full justify-start" onClick={() => {}}>
+                Create Proposal
+              </Button>
+              <Button variant="outline" className="w-full justify-start" onClick={() => {}}>
+                Create Task
+              </Button>
+              <Button variant="ghost" className="w-full justify-start text-rose-600" onClick={() => {}}>
+                Delete Lead
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
-  );
-}
-export default function LeadDetailPage() {
-  return (
-    <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-6 text-slate-500">Loading...</div>}>
-      <LeadDetailContent />
-    </Suspense>
   );
 }

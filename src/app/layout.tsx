@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AppShell } from '@/components/layout/AppShell';
-import { ToastProvider } from '@/components/ui/Toast';
+import { Toaster } from '@/components/ui/Toaster';
 import { CommandPalette } from '@/components/CommandPalette';
+import { ToastProvider } from '@/components/ui/shadcn/toast';
+import { ToastProvider as LegacyToastProvider } from '@/components/ui/Toast';
 
 export const metadata: Metadata = {
   title: 'Lead Management',
@@ -41,10 +43,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             `,
           }}
         />
-        <AppShell>
-          <ToastProvider>{children}</ToastProvider>
-          <CommandPalette />
-        </AppShell>
+        <LegacyToastProvider>
+          <ToastProvider>
+            <AppShell>
+              {children}
+              <CommandPalette />
+            </AppShell>
+            <Toaster />
+          </ToastProvider>
+        </LegacyToastProvider>
       </body>
     </html>
   );

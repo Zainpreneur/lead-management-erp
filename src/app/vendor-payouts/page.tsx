@@ -1,18 +1,17 @@
 'use client';
+
 import * as React from 'react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Modal } from '@/components/ui/Modal';
-import { useToast } from '@/components/ui/Toast';
+import { Button } from '@/components/ui/shadcn/button';
+import { Input } from '@/components/ui/shadcn/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/shadcn/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/shadcn/dialog';
+import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Combobox } from '@/components/ui/Combobox';
-import { api } from '@/lib/api';
+import { listVendorPayouts, listVendors, createVendorPayout, releaseVendorPayout, updateVendorPayoutStatus } from '@/actions/vendors';
 import type { VendorPayout, Vendor } from '@/lib/types';
-import { vendorToOption } from '@/lib/combobox-helpers';
 import { VENDOR_PAYOUT_STATUS_LABELS, VENDOR_PAYOUT_TRIGGER_LABELS } from '@/lib/types';
 
 export default function VendorPayoutsPage() {
-  const toast = useToast();
   const [payouts, setPayouts] = React.useState<VendorPayout[]>([]);
   const [vendors, setVendors] = React.useState<Vendor[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -20,56 +19,67 @@ export default function VendorPayoutsPage() {
   const [submitting, setSubmitting] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const pageSize = 20;
-  const [form, setForm] = React.useState({ vendorReference: '', sourcingRequestReference: '', deliverable: '', amount: 0, triggerType: 'client_approval', status: 'pending', notes: '' });
+  const [form, setForm] = React.useState({ 
+    vendorReference: '', sourcingRequestReference: '', deliverable: '', amount: 0, 
+    triggerType: 'client_approval', status: 'pending', notes: '' 
+  });
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [p, v] = await Promise.all([api.listVendorPayouts({ limit: pageSize, page }), api.listVendors({ limit: 100 })]);
-      setPayouts(p.payouts);
-      setVendors(v.vendors);
+      const [p, v] = await Promise.all([
+        listVendorPayouts({ limit: pageSize, page }),
+        listVendors({ limit: 100, page })
+      ]);
+      setPayouts((p.payouts as unknown) as VendorPayout[]);
+      setVendors((v.vendors as unknown) as Vendor[]);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, [page]);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   React.useEffect(() => { load(); }, [load]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.createVendorPayout({ vendorReference: form.vendorReference, sourcingRequestReference: form.sourcingRequestReference || null, deliverable: form.deliverable, amount: Number(form.amount), triggerType: form.triggerType, status: form.status, notes: form.notes || null });
+      await createVendorPayout({
+        vendorReference: form.vendorReference,
+        sourcingRequestReference: form.sourcingRequestReference || null,
+        deliverable: form.deliverable,
+        amount: Number(form.amount),
+        triggerType: form.triggerType,
+        status: form.status,
+        notes: form.notes || null
+      });
       setCreating(false);
-      toast.add({ variant: 'success', title: 'Payout created' });
+      toast.success('Payout created');
       setForm({ vendorReference: '', sourcingRequestReference: '', deliverable: '', amount: 0, triggerType: 'client_approval', status: 'pending', notes: '' });
       await load();
     } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not create payout', description: e instanceof Error ? e.message : '' });
+      toast.error('Could not create payout', { description: e instanceof Error ? e.message : '' });
     } finally { setSubmitting(false); }
   };
 
   const handleRelease = async (ref: string) => {
     try {
-      await api.releaseVendorPayout(ref);
-      toast.add({ variant: 'success', title: 'Payout released' });
+      await releaseVendorPayout(ref);
+      toast.success('Payout released');
       await load();
     } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not release', description: e instanceof Error ? e.message : '' });
+      toast.error('Could not release', { description: e instanceof Error ? e.message : '' });
     }
   };
 
   const handleStatusChange = async (ref: string, status: string) => {
     try {
-      await api.updateVendorPayoutStatus(ref, status);
-      toast.add({ variant: 'success', title: 'Status updated' });
+      await updateVendorPayoutStatus(ref, status);
+      toast.success('Status updated');
       await load();
     } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not update', description: e instanceof Error ? e.message : '' });
+      toast.error('Could not update', { description: e instanceof Error ? e.message : '' });
     }
   };
-
-  const vendorOptions = vendors.map(vendorToOption);
 
   return (
     <div className="mx-auto max-w-7xl px-4 pb-28 pt-4 sm:px-6">
@@ -94,13 +104,16 @@ export default function VendorPayoutsPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-xs font-bold text-slate-900">${p.amount.toLocaleString()}</div>
-                    <select value={p.status} onChange={(e) => handleStatusChange(p.reference, e.target.value)} className="text-xs border rounded px-2 py-1">
-                      <option value="pending">Pending</option>
-                      <option value="approved">Approved</option>
-                      <option value="released">Released</option>
-                      <option value="rejected">Rejected</option>
-                    </select>
-                    {!p.released && <button onClick={() => handleRelease(p.reference)} className="text-xs text-emerald-600 hover:underline">Release</button>}
+                    <Select value={p.status} onValueChange={(v) => handleStatusChange(p.reference, v)}>
+                      <SelectTrigger className="w-36"><SelectValue placeholder="Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
+                        <SelectItem value="released">Released</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!p.released && <Button variant="ghost" size="sm" onClick={() => handleRelease(p.reference)} className="text-emerald-600 hover:text-emerald-700">Release</Button>}
                   </div>
                 </div>
                 {p.notes && <p className="mt-2 text-sm text-slate-600">{p.notes}</p>}
@@ -117,49 +130,54 @@ export default function VendorPayoutsPage() {
         </>
       )}
 
-      <Modal open={creating} onClose={() => setCreating(false)} title="New Vendor Payout">
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <Combobox
-              label="Vendor"
-              required
-              options={vendorOptions}
-              value={form.vendorReference}
-              onChange={(v) => setForm({ ...form, vendorReference: v })}
-              placeholder="Search vendor by name, phone, email, city..."
-              recentKey="vendor-payout-vendor"
-              allowCreate={false}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Deliverable *</label>
-            <Input value={form.deliverable} onChange={(e) => setForm({ ...form, deliverable: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Vendor Payout</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Amount *</label>
-              <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} />
+              <label className="mb-1 block text-sm font-medium text-slate-700">Vendor *</label>
+              <Select value={form.vendorReference} onValueChange={(v) => setForm({ ...form, vendorReference: v })}>
+                <SelectTrigger><SelectValue placeholder="Search vendor..." /></SelectTrigger>
+                <SelectContent>
+                  {vendors.map((v) => <SelectItem key={v.reference} value={v.reference}>{v.name} ({v.reference})</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Trigger Type</label>
-              <select value={form.triggerType} onChange={(e) => setForm({ ...form, triggerType: e.target.value })} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                <option value="client_approval">Client Approval</option>
-                <option value="internal_signoff">Internal Signoff</option>
-                <option value="deliverable_done">Deliverable Done</option>
-                <option value="fixed_date">Fixed Date</option>
-              </select>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Deliverable *</label>
+              <Input value={form.deliverable} onChange={(e) => setForm({ ...form, deliverable: e.target.value })} />
             </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Notes</label>
-            <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setCreating(false)}>Cancel</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Create'}</Button>
-          </div>
-        </form>
-      </Modal>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Amount *</label>
+                <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Trigger Type</label>
+                <Select value={form.triggerType} onValueChange={(v) => setForm({ ...form, triggerType: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select trigger" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="client_approval">Client Approval</SelectItem>
+                    <SelectItem value="internal_signoff">Internal Signoff</SelectItem>
+                    <SelectItem value="deliverable_done">Deliverable Done</SelectItem>
+                    <SelectItem value="fixed_date">Fixed Date</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+              <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Create'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

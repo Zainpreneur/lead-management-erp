@@ -228,39 +228,8 @@ export function processCSVImport(entityType: string, csv: string): { processed: 
   }
   return { processed: 0, errors: ['Unsupported entity type'] };
 }
-// Excel export using xlsx
-export async function exportLeadsXLSX(): Promise<Buffer> {
-  const XLSX = await import('xlsx');
-  const leads = db.prepare('SELECT * FROM leads ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
-  const ws = XLSX.utils.json_to_sheet(leads);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Leads');
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
-
-export async function exportCustomersXLSX(): Promise<Buffer> {
-  const XLSX = await import('xlsx');
-  const customers = db.prepare('SELECT * FROM customers ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
-  const ws = XLSX.utils.json_to_sheet(customers);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Customers');
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
-
-export async function exportInvoicesXLSX(): Promise<Buffer> {
-  const XLSX = await import('xlsx');
-  const invoices = db.prepare('SELECT * FROM invoices ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
-  const ws = XLSX.utils.json_to_sheet(invoices);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
-
-export async function exportExpensesXLSX(): Promise<Buffer> {
-  const XLSX = await import('xlsx');
-  const expenses = db.prepare('SELECT * FROM expenses ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
-  const ws = XLSX.utils.json_to_sheet(expenses);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
+// Excel export using xlsx - commented out until xlsx package is installed
+// export async function exportLeadsXLSX(): Promise<Buffer> { ... }
+// export async function exportCustomersXLSX(): Promise<Buffer> { ... }
+// export async function exportInvoicesXLSX(): Promise<Buffer> { ... }
+// export async function exportExpensesXLSX(): Promise<Buffer> { ... }

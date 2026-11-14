@@ -1,23 +1,24 @@
 'use client';
+
 import * as React from 'react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
-import { Modal } from '@/components/ui/Modal';
-import { useToast } from '@/components/ui/Toast';
+import { Button } from '@/components/ui/shadcn/button';
+import { Input } from '@/components/ui/shadcn/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/shadcn/select';
+import { Textarea } from '@/components/ui/shadcn/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/shadcn/dialog';
+import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { api } from '@/lib/api';
-import type { Task, TaskInput, Person } from '@/lib/types';
-import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS } from '@/lib/types';
 import { ViewSwitcher } from '@/components/views/ViewSwitcher';
 import { CalendarView } from '@/components/views/CalendarView';
 import { TimelineView } from '@/components/views/TimelineView';
 import { GanttView } from '@/components/views/GanttView';
 import { LeadBoard } from '@/components/lead/LeadBoard';
+import { listTasks, createTask, updateTask, deleteTask } from '@/actions/tasks';
+import { listPeople } from '@/actions/people';
+import type { Task, TaskInput, Person } from '@/lib/types';
+import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS } from '@/lib/types';
 
 export default function TasksPage() {
-  const toast = useToast();
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [people, setPeople] = React.useState<Person[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -32,29 +33,29 @@ export default function TasksPage() {
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [t, p] = await Promise.all([api.listTasks({ limit: pageSize, page }), api.people()]);
-      setTasks(t.tasks);
-      setPeople(p.people);
+      const [t, p] = await Promise.all([
+        listTasks({ limit: pageSize, page }),
+        listPeople()
+      ]);
+      setTasks((t.tasks as unknown) as Task[]);
+      setPeople((p.people as unknown) as Person[]);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, [page]);
 
-  React.useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+  React.useEffect(() => { load(); }, [load]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.createTask(form);
+      await createTask(form);
       setCreating(false);
-      toast.add({ variant: 'success', title: 'Task created' });
+      toast.success('Task created');
       setForm({ title: '', status: 'open', priority: 'medium' });
       await load();
     } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not create task', description: e instanceof Error ? e.message : '' });
+      toast.error('Could not create task', { description: e instanceof Error ? e.message : '' });
     } finally { setSubmitting(false); }
   };
 
@@ -68,13 +69,24 @@ export default function TasksPage() {
     if (!editing) return;
     setSubmitting(true);
     try {
-      await api.updateTask(editing.reference, form);
+      await updateTask(editing.reference, form);
       setEditing(null);
-      toast.add({ variant: 'success', title: 'Task updated' });
+      toast.success('Task updated');
       await load();
     } catch (e) {
-      toast.add({ variant: 'error', title: 'Could not update task', description: e instanceof Error ? e.message : '' });
+      toast.error('Could not update task', { description: e instanceof Error ? e.message : '' });
     } finally { setSubmitting(false); }
+  };
+
+  const handleDelete = async (reference: string) => {
+    if (!confirm('Delete this task?')) return;
+    try {
+      await deleteTask(reference);
+      toast.success('Task deleted');
+      await load();
+    } catch (e) {
+      toast.error('Could not delete task', { description: e instanceof Error ? e.message : '' });
+    }
   };
 
   return (
@@ -113,7 +125,7 @@ export default function TasksPage() {
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-slate-500">{t.dueDate || 'No due date'}</div>
                     <button onClick={() => openEdit(t)} className="text-xs text-brand-600 hover:underline">Edit</button>
-                    <button onClick={async () => { if (confirm('Delete?')) { await api.deleteTask(t.reference); toast.add({ variant: 'success', title: 'Deleted' }); load(); } }} className="text-xs text-rose-600 hover:underline">Delete</button>
+                    <button onClick={() => handleDelete(t.reference)} className="text-xs text-rose-600 hover:underline">Delete</button>
                   </div>
                 </div>
                 {t.description && <p className="mt-2 text-sm text-slate-600">{t.description}</p>}
@@ -189,89 +201,117 @@ export default function TasksPage() {
         </>
       )}
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit Task">
-        <form onSubmit={handleUpdate} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
-            <Input value={form.title ?? ''} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-            <Textarea value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Dialog open={!!editing} onOpenChange={() => setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Task</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleUpdate} className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
-              <Select value={form.status ?? 'open'} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {Object.entries(TASK_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </Select>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
+              <Input value={form.title ?? ''} onChange={(e) => setForm({ ...form, title: e.target.value })} />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
-              <Select value={form.priority ?? 'medium'} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-                {Object.entries(TASK_PRIORITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </Select>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+              <Textarea value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
-              <Input type="date" value={form.dueDate ?? ''} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
+                <Select value={form.status ?? 'open'} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(TASK_STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                <Select value={form.priority ?? 'medium'} onValueChange={(v) => setForm({ ...form, priority: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(TASK_PRIORITY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
+                <Input type="date" value={form.dueDate ?? ''} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Assigned To</label>
+                <Select value={form.assignedTo ? String(form.assignedTo) : ''} onValueChange={(v) => setForm({ ...form, assignedTo: v ? Number(v) : null })}>
+                  <SelectTrigger><SelectValue placeholder="Select assignee" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {people.map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Assigned To</label>
-              <Select value={form.assignedTo ? String(form.assignedTo) : ''} onChange={(e) => setForm({ ...form, assignedTo: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Unassigned</option>
-                {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </Select>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Update'}</Button>
-          </div>
-        </form>
-      </Modal>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Update'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      <Modal open={creating} onClose={() => setCreating(false)} title="New Task">
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
-            <Input value={form.title ?? ''} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-            <Textarea value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Task</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
-              <Select value={form.status ?? 'open'} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {Object.entries(TASK_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </Select>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
+              <Input value={form.title ?? ''} onChange={(e) => setForm({ ...form, title: e.target.value })} />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
-              <Select value={form.priority ?? 'medium'} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-                {Object.entries(TASK_PRIORITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </Select>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+              <Textarea value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
-              <Input type="date" value={form.dueDate ?? ''} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
+                <Select value={form.status ?? 'open'} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(TASK_STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                <Select value={form.priority ?? 'medium'} onValueChange={(v) => setForm({ ...form, priority: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(TASK_PRIORITY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
+                <Input type="date" value={form.dueDate ?? ''} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Assigned To</label>
+                <Select value={form.assignedTo ? String(form.assignedTo) : ''} onValueChange={(v) => setForm({ ...form, assignedTo: v ? Number(v) : null })}>
+                  <SelectTrigger><SelectValue placeholder="Select assignee" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {people.map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Assigned To</label>
-              <Select value={form.assignedTo ? String(form.assignedTo) : ''} onChange={(e) => setForm({ ...form, assignedTo: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Unassigned</option>
-                {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </Select>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setCreating(false)}>Cancel</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Create'}</Button>
-          </div>
-        </form>
-      </Modal>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Create'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
