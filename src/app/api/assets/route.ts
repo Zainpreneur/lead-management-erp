@@ -7,6 +7,7 @@ export async function GET(request: Request) {
     search: url.searchParams.get('search') || undefined,
     status: url.searchParams.get('status') || undefined,
     businessReference: url.searchParams.get('businessReference') || undefined,
+    vendorReference: url.searchParams.get('vendorReference') || undefined,
     limit: url.searchParams.get('limit') ? Number(url.searchParams.get('limit')) : undefined,
     page: url.searchParams.get('page') ? Number(url.searchParams.get('page')) : undefined,
   });

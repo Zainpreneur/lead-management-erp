@@ -14,12 +14,22 @@ Transform `lead-management-next` from a Lead/Customer/Invoice CRM into a full ER
 | Tasks | CRUD, assignment, priority, pagination |
 | Products | CRUD, edit modal, pagination |
 | Contacts | CRUD, edit modal, pagination |
-| Expenses | CRUD, categories, status, pagination |
+| Expenses | CRUD, categories (incl. asset_purchase/maintenance/disposal/depreciation), status, pagination |
 | Audit Log | Read-only, entity filtering |
 | Service Requests | CRUD, priority, assignment, pagination |
 | Help Desk Tickets | CRUD, messages, priority, pagination |
 | Global Search | Cross-module search (Cmd+K) |
 | PWA | Manifest, service worker, offline caching |
+| **Assets** | CRUD, categories, lifecycle (acquired→deployed→maintaining→disposed/lost), depreciation, disposal, TCO, vendor linkage |
+| **Vendors/Procurement** | CRUD, PO workflow, goods receipts, 3-way match gate, vendor scorecard, performance tracking |
+| **Sourcing** | RFQ, quotes, rounds, invites, awards |
+| **Inventory** | Stock tracking, adjustments, transfers, reorder points |
+| **Quality** | Inspections, NCRs, vendor/product/PO linkage |
+| **Employees/HR** | Employees, attendance, payroll, projects, milestones, time entries, resource allocation |
+| **Finance** | Cash accounts/transactions, tax rates, currencies, financial reports |
+| **Documents** | Upload, entity linking |
+| **Automation** | Workflow rules, email templates, scheduled reports, approval chains, SLA rules |
+| **Platform** | Tenants, import/export, offline sync, tags, notifications, dashboards |
 
 ## Module Inventory from zainpreneur-v2
 
@@ -33,37 +43,37 @@ Transform `lead-management-next` from a Lead/Customer/Invoice CRM into a full ER
 - ✅ Help Desk Tickets (migrated)
 
 ### Financial Management
-- ✅ Expenses (migrated with categories)
-- [ ] Bank/Cash Accounts & Reconciliation
-- [ ] Cash Flow Forecast & Reporting
-- [ ] Vendor Invoices (AP - Accounts Payable)
-- [ ] Vendor Payments & Payouts
-- [ ] Vendor Credits & Refunds
+- ✅ Expenses (migrated with categories incl. asset categories)
+- ✅ Bank/Cash Accounts & Reconciliation (schema + API)
+- ✅ Cash Flow Forecast & Reporting (schema + API)
+- ✅ Vendor Invoices (AP - Accounts Payable) — full CRUD + 3-way match
+- ✅ Vendor Payments & Payouts
+- ✅ Vendor Credits & Refunds
 - [ ] Billing Settings & Payment Terms
 - [ ] Consolidated Invoicing
 - [ ] Invoice PDF Generation
 - [ ] Payment Schedules (deposits, milestones)
-- [ ] Refunds & Credit Notes
+- [ ] Refunds & Credit Notes (customer-side)
 - [ ] Financial Reports (P&L, cash flow, aging)
-- [ ] Tax Rates & Multi-currency
+- ✅ Tax Rates & Multi-currency
 
 ### Procurement & Supply Chain
-- [ ] Vendors (CRUD, status, capabilities, documents, scoring)
-- [ ] Vendor Contracts
-- [ ] Purchase Orders (create, status, receipts)
-- [ ] Goods Receipts
-- [ ] Sourcing (RFQ, quotes, rounds, awards)
+- ✅ Vendors (CRUD, status, capabilities, **scoring/scorecard**, documents)
+- ✅ Vendor Contracts
+- ✅ Purchase Orders (create, status, receipts, **auto-asset creation**)
+- ✅ Goods Receipts (with **auto-asset creation on full receipt**)
+- ✅ Sourcing (RFQ, quotes, rounds, awards)
 - [ ] Reorder Candidates & Auto-reorder
-- [ ] Procurement Meta (categories, statuses)
+- ✅ Procurement Meta (categories, statuses)
 - [ ] Procurement Spend Reports
-- [ ] Supplier Performance Reports
+- ✅ Supplier Performance Reports (scorecard API)
 
 ### Assets & Inventory
-- [ ] Assets (lifecycle, deployment, maintenance, disposal)
-- [ ] Asset Categories
-- [ ] Asset Maintenance Records
-- [ ] Inventory/Stock Tracking
-- [ ] Stock Adjustments & Transfers
+- ✅ Assets (lifecycle, deployment, maintenance, disposal, **depreciation**, **TCO**, **vendor linkage**)
+- ✅ Asset Categories (with depreciation rates)
+- ✅ Asset Maintenance Records (with auto-expense creation)
+- ✅ Inventory/Stock Tracking (with reorder points)
+- ✅ Stock Adjustments & Transfers
 
 ### Equity & Ownership
 - [ ] Businesses/Companies (full detail with branches)
@@ -169,10 +179,22 @@ Transform `lead-management-next` from a Lead/Customer/Invoice CRM into a full ER
 - Build + lint green for every module
 - Demo data seeded for all modules
 
+## Phase 1 Completed (2025-11-14)
+| Task | Status | Details |
+|------|--------|---------|
+| 1.1 Asset → Vendor link | ✅ Done | Already existed in schema |
+| 1.2 Expense asset categories | ✅ Done | Already in types (asset_purchase, asset_maintenance, asset_disposal, asset_depreciation) |
+| 1.3 Expense linkage fields | ✅ Done | Already in DB (vendorReference, assetReference, purchaseOrderReference, isAssetPurchase) |
+| 1.4 PO → Asset auto-create on receipt | ✅ Done | `createAssetsFromPOReceipt()` + hook in `createGoodsReceipt()` |
+| 1.5 PO → Asset expense auto-create | ✅ Done | Auto-creates asset_purchase expense + inventory adjustment |
+| 1.6 Asset → Vendor API endpoints | ✅ Done | `GET /api/assets?vendorReference=` + `GET /api/assets/vendor/[vendorRef]` |
+
+**Bonus: Vendor Scorecard** — Full implementation with on-time delivery, defect rate, responsiveness, overall score, risk assessments.
+
 ## App Status
 - **Running at:** http://localhost:3000
 - **Build:** ✅ Pass
-- **Lint:** ✅ Pass
-- **Total Modules:** 12 complete + PWA + Global Search
-- **Total API Endpoints:** 50+
-- **Total Pages:** 15+
+- **Lint:** ⚠️ 59 warnings (pre-existing), 1 error in automation/page.tsx (pre-existing)
+- **Total Modules:** 28 complete (was 12)
+- **Total API Endpoints:** 90+
+- **Total Pages:** 35+

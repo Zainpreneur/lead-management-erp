@@ -1,5 +1,7 @@
 import db from './db';
-import type { Vendor, VendorInput, PurchaseOrder, PurchaseOrderInput, PurchaseOrderItem, InventoryAdjustment, GoodsReceipt, GoodsReceiptItem, GoodsReceiptInput } from '@/lib/types';
+import type { Vendor, VendorInput, PurchaseOrder, PurchaseOrderInput, PurchaseOrderItem, InventoryAdjustment, GoodsReceipt, GoodsReceiptItem, GoodsReceiptInput, Asset, AssetInput } from '@/lib/types';
+import { createAsset } from './assets';
+import { createExpense } from './expenses';
 
 interface VendorRow {
   id: number;
@@ -18,6 +20,15 @@ interface VendorRow {
   payment_terms: string | null;
   notes: string | null;
   rating: number | null;
+  // Scorecard fields
+  on_time_delivery_rate: number | null;
+  defect_rate: number | null;
+  responsiveness_score: number | null;
+  overall_score: number | null;
+  financial_risk: string | null;
+  operational_risk: string | null;
+  compliance_risk: string | null;
+  last_assessed: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -47,6 +58,9 @@ interface POItemRow {
   line_total: number;
   received_quantity: number;
   sort_order: number;
+  serial_number: string | null;
+  model: string | null;
+  manufacturer: string | null;
 }
 
 interface AdjRow {
@@ -81,6 +95,15 @@ function hydrateVendor(r: VendorRow): Vendor {
     paymentTerms: r.payment_terms,
     notes: r.notes,
     rating: r.rating,
+    // Scorecard fields
+    onTimeDeliveryRate: r.on_time_delivery_rate ?? 0,
+    defectRate: r.defect_rate ?? 0,
+    responsivenessScore: r.responsiveness_score ?? 0,
+    overallScore: r.overall_score ?? 0,
+    financialRisk: (r.financial_risk as 'low' | 'medium' | 'high') || 'low',
+    operationalRisk: (r.operational_risk as 'low' | 'medium' | 'high') || 'low',
+    complianceRisk: (r.compliance_risk as 'low' | 'medium' | 'high') || 'low',
+    lastAssessed: r.last_assessed || null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -97,6 +120,9 @@ function hydratePOItem(r: POItemRow): PurchaseOrderItem {
     lineTotal: r.line_total,
     receivedQuantity: r.received_quantity,
     sortOrder: r.sort_order,
+    serialNumber: r.serial_number,
+    model: r.model,
+    manufacturer: r.manufacturer,
   };
 }
 
@@ -232,8 +258,8 @@ export function createPurchaseOrder(input: PurchaseOrderInput): PurchaseOrder {
     items.forEach((item, idx) => {
       const qty = item.quantity ?? 1;
       const price = item.unitPrice ?? 0;
-      db.prepare(`INSERT INTO purchase_order_items (po_reference, product_reference, description, quantity, unit_price, line_total, received_quantity, sort_order) VALUES (?,?,?,?,?,?,?,?)`)
-        .run(ref, item.productReference ?? null, item.description, qty, price, qty * price, 0, idx);
+      db.prepare(`INSERT INTO purchase_order_items (po_reference, product_reference, description, quantity, unit_price, line_total, received_quantity, sort_order, serial_number, model, manufacturer) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(ref, item.productReference ?? null, item.description, qty, price, qty * price, 0, idx, item.serialNumber ?? null, item.model ?? null, item.manufacturer ?? null);
     });
     
     return id;
@@ -422,14 +448,27 @@ export function createGoodsReceipt(input: GoodsReceiptInput): GoodsReceipt {
 
     // Update PO status based on receiving
     const updatedPO = getPurchaseOrderByIdOrRef(input.poReference);
+    let wasNotReceived = !['received', 'partially_received'].includes(po.status);
+    let nowReceived = false;
+    
     if (updatedPO) {
       const allReceived = updatedPO.items.every((i) => i.receivedQuantity >= i.quantity - 1e-9);
       const anyReceived = updatedPO.items.some((i) => i.receivedQuantity > 0);
       let newStatus = updatedPO.status;
-      if (allReceived) newStatus = 'received';
+      if (allReceived) { newStatus = 'received'; nowReceived = true; }
       else if (anyReceived) newStatus = 'partially_received';
       if (newStatus !== updatedPO.status && !['cancelled', 'closed'].includes(updatedPO.status)) {
         db.prepare('UPDATE purchase_orders SET status = ?, updated_at = ? WHERE reference = ?').run(newStatus, ts, input.poReference);
+      }
+    }
+
+    // Auto-create assets when PO becomes fully received
+    if (wasNotReceived && nowReceived) {
+      try {
+        createAssetsFromPOReceipt(input.poReference);
+      } catch (e) {
+        console.error('Failed to auto-create assets from PO receipt:', e);
+        // Don't fail the receipt if asset creation fails
       }
     }
 
@@ -459,6 +498,100 @@ export function getPOReceivingStatus(poReference: string): { poReference: string
   return { poReference, items, fullyReceived, partiallyReceived };
 }
 
+// Create assets from received PO items
+export function createAssetsFromPOReceipt(poReference: string): { created: number; assetRefs: string[]; errors: string[] } {
+  const po = getPurchaseOrderByIdOrRef(poReference);
+  if (!po) throw new Error('Purchase order not found');
+  if (!['received', 'partially_received'].includes(po.status)) {
+    throw new Error('PO must be received or partially_received to create assets');
+  }
+
+  const tx = db.transaction(() => {
+    const createdAssets: string[] = [];
+    const errors: string[] = [];
+
+    for (const item of po.items) {
+      if (item.receivedQuantity > 0) {
+        try {
+          // Check if asset already exists for this PO item
+          const existingAsset = db.prepare('SELECT * FROM assets WHERE purchase_order_reference = ? AND serial_number = ?').get(po.reference, item.serialNumber || `${po.reference}-${item.id}`) as { id: number } | undefined;
+          
+          if (existingAsset) {
+            errors.push(`Asset already exists for PO item ${item.id}`);
+            continue;
+          }
+
+          const assetInput: AssetInput = {
+            name: item.description,
+            categoryId: null, // Could be derived from product
+            status: 'acquired',
+            purchasePrice: item.unitPrice * item.receivedQuantity,
+            currency: po.currency,
+            purchaseDate: new Date().toISOString().slice(0, 10),
+            purchaseOrderReference: po.reference,
+            expenseReference: null,
+            serialNumber: item.serialNumber || `${po.reference}-${item.id}`,
+            model: item.model || null,
+            manufacturer: item.manufacturer || null,
+            warrantyExpiry: null,
+            assignedTo: null,
+            assignedBranch: null,
+            businessReference: null,
+            location: null,
+            conditionRating: 10,
+            notes: `Auto-created from PO ${po.reference} receipt`,
+            vendorReference: po.vendorReference,
+            vendorName: po.vendorName,
+            depreciationRate: 0,
+            depreciationMethod: 'straight_line',
+          };
+
+          const asset = createAsset(assetInput);
+          createdAssets.push(asset.reference);
+
+          // Auto-create asset purchase expense
+          createExpense({
+            title: `Asset Purchase: ${item.description}`,
+            category: 'asset_purchase',
+            amount: item.unitPrice * item.receivedQuantity,
+            currency: po.currency,
+            status: 'paid',
+            expenseDate: new Date().toISOString().slice(0, 10),
+            vendorReference: po.vendorReference,
+            assetReference: asset.reference,
+            purchaseOrderReference: po.reference,
+            assetCategory: 'purchase',
+            isAssetPurchase: true,
+            notes: `Auto-created from PO ${po.reference} receipt for ${item.receivedQuantity} units`,
+          });
+
+          // Auto-create inventory adjustment
+          createInventoryAdjustment({
+            productReference: item.productReference || '',
+            type: 'receipt',
+            quantity: item.receivedQuantity,
+            reason: `PO ${po.reference} received`,
+            createdBy: 'system',
+          });
+
+        } catch (e) {
+          errors.push(`PO item ${item.id}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+    }
+
+    // Mark PO as having assets created
+    if (createdAssets.length > 0) {
+      db.prepare('UPDATE purchase_orders SET asset_created = 1, asset_references = ?, updated_at = ? WHERE reference = ?')
+        .run(JSON.stringify(createdAssets), new Date().toISOString(), po.reference);
+    }
+
+    return { created: createdAssets.length, assetRefs: createdAssets, errors };
+  });
+
+  return tx();
+}
+
 // Invoice gate: a vendor invoice may be paid only if goods have been received.
 export function invoiceGate(poReference: string): { allowed: boolean; reason: string; receivedValue: number; orderedValue: number; receivedPercent: number } {
   const status = getPOReceivingStatus(poReference);
@@ -475,6 +608,182 @@ export function invoiceGate(poReference: string): { allowed: boolean; reason: st
     return { allowed: false, reason: 'Partial receipt only — invoice blocked until full delivery', receivedValue, orderedValue, receivedPercent };
   }
   return { allowed: false, reason: 'No goods received yet — invoice blocked', receivedValue, orderedValue, receivedPercent };
+}
+
+// Calculate vendor performance scorecard
+export function calculateVendorScorecard(vendorReference: string): {
+  onTimeDeliveryRate: number;
+  defectRate: number;
+  responsivenessScore: number;
+  overallScore: number;
+  financialRisk: 'low' | 'medium' | 'high';
+  operationalRisk: 'low' | 'medium' | 'high';
+  complianceRisk: 'low' | 'medium' | 'high';
+  details: {
+    totalPOs: number;
+    receivedPOs: number;
+    onTimePOs: number;
+    totalReceipts: number;
+    ncrCount: number;
+    avgResponseTimeHours: number;
+  };
+} {
+  // Get all POs for this vendor
+  const pos = db.prepare('SELECT * FROM purchase_orders WHERE vendor_reference = ?').all(vendorReference) as PORow[];
+  
+  if (pos.length === 0) {
+    return {
+      onTimeDeliveryRate: 0,
+      defectRate: 0,
+      responsivenessScore: 0,
+      overallScore: 0,
+      financialRisk: 'low',
+      operationalRisk: 'low',
+      complianceRisk: 'low',
+      details: {
+        totalPOs: 0,
+        receivedPOs: 0,
+        onTimePOs: 0,
+        totalReceipts: 0,
+        ncrCount: 0,
+        avgResponseTimeHours: 0,
+      },
+    };
+  }
+
+  // Calculate on-time delivery rate
+  let receivedPOs = 0;
+  let onTimePOs = 0;
+  let totalReceipts = 0;
+
+  for (const po of pos) {
+    const grs = db.prepare('SELECT * FROM goods_receipts WHERE po_reference = ?').all(po.reference) as GRRow[];
+    if (grs.length > 0) {
+      receivedPOs++;
+      totalReceipts += grs.length;
+      
+      // Check if received on or before expected delivery
+      const expectedDelivery = po.expected_delivery ? new Date(po.expected_delivery) : null;
+      const lastReceipt = grs.reduce((latest, gr) => {
+        const grDate = new Date(gr.received_date);
+        return grDate > latest ? grDate : latest;
+      }, new Date(0));
+      
+      if (!expectedDelivery || lastReceipt <= expectedDelivery) {
+        onTimePOs++;
+      }
+    }
+  }
+
+  const onTimeDeliveryRate = receivedPOs > 0 ? (onTimePOs / receivedPOs) * 100 : 0;
+
+  // Calculate defect rate from NCRs
+  const ncrCount = db.prepare(`
+    SELECT COUNT(*) as count FROM non_conformance_reports 
+    WHERE vendor_reference = ?
+  `).get(vendorReference) as { count: number };
+  
+  const defectRate = totalReceipts > 0 ? (ncrCount.count / totalReceipts) * 100 : 0;
+
+  // Calculate responsiveness (avg time from PO creation to vendor acknowledgment)
+  // For now, use a simplified metric based on how quickly POs are received
+  let totalResponseHours = 0;
+  let responseCount = 0;
+  
+  for (const po of pos) {
+    const grs = db.prepare('SELECT * FROM goods_receipts WHERE po_reference = ? ORDER BY received_date ASC LIMIT 1').get(po.reference) as GRRow | undefined;
+    if (grs) {
+      const poDate = new Date(po.order_date);
+      const firstReceipt = new Date(grs.received_date);
+      const hours = (firstReceipt.getTime() - poDate.getTime()) / (1000 * 60 * 60);
+      if (hours > 0) {
+        totalResponseHours += hours;
+        responseCount++;
+      }
+    }
+  }
+  
+  const avgResponseTimeHours = responseCount > 0 ? totalResponseHours / responseCount : 0;
+  
+  // Responsiveness score: inverse of avg response time (capped)
+  const responsivenessScore = Math.max(0, 100 - Math.min(avgResponseTimeHours / 24, 100));
+
+  // Overall score: weighted average
+  const overallScore = Math.round(
+    onTimeDeliveryRate * 0.5 +
+    (100 - Math.min(defectRate * 10, 100)) * 0.3 +
+    responsivenessScore * 0.2
+  );
+
+  // Risk assessments (simplified)
+  const financialRisk = overallScore >= 80 ? 'low' : overallScore >= 60 ? 'medium' : 'high';
+  const operationalRisk = onTimeDeliveryRate >= 90 ? 'low' : onTimeDeliveryRate >= 70 ? 'medium' : 'high';
+  const complianceRisk = defectRate <= 2 ? 'low' : defectRate <= 5 ? 'medium' : 'high';
+
+  return {
+    onTimeDeliveryRate: Math.round(onTimeDeliveryRate * 10) / 10,
+    defectRate: Math.round(defectRate * 10) / 10,
+    responsivenessScore: Math.round(responsivenessScore * 10) / 10,
+    overallScore,
+    financialRisk,
+    operationalRisk,
+    complianceRisk,
+    details: {
+      totalPOs: pos.length,
+      receivedPOs,
+      onTimePOs,
+      totalReceipts,
+      ncrCount: ncrCount.count,
+      avgResponseTimeHours: Math.round(avgResponseTimeHours * 10) / 10,
+    },
+  };
+}
+
+// Update vendor scorecard in database
+export function updateVendorScorecard(vendorReference: string): void {
+  const scorecard = calculateVendorScorecard(vendorReference);
+  db.prepare(`
+    UPDATE vendors SET
+      on_time_delivery_rate = ?,
+      defect_rate = ?,
+      responsiveness_score = ?,
+      overall_score = ?,
+      financial_risk = ?,
+      operational_risk = ?,
+      compliance_risk = ?,
+      last_assessed = ?,
+      updated_at = ?
+    WHERE reference = ?
+  `).run(
+    scorecard.onTimeDeliveryRate,
+    scorecard.defectRate,
+    scorecard.responsivenessScore,
+    scorecard.overallScore,
+    scorecard.financialRisk,
+    scorecard.operationalRisk,
+    scorecard.complianceRisk,
+    new Date().toISOString(),
+    new Date().toISOString(),
+    vendorReference
+  );
+}
+
+// Recalculate scorecards for all vendors
+export function recalculateAllVendorScorecards(): { updated: number; errors: string[] } {
+  const vendors = db.prepare('SELECT reference FROM vendors').all() as { reference: string }[];
+  let updated = 0;
+  const errors: string[] = [];
+  
+  for (const v of vendors) {
+    try {
+      updateVendorScorecard(v.reference);
+      updated++;
+    } catch (e) {
+      errors.push(`${v.reference}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  }
+  
+  return { updated, errors };
 }
 
 // ---------- Stock Transfers ----------

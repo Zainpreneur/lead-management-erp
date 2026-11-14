@@ -856,6 +856,15 @@ export interface Vendor {
   paymentTerms: string | null;
   notes: string | null;
   rating: number | null;
+  // Scorecard fields
+  onTimeDeliveryRate: number;
+  defectRate: number;
+  responsivenessScore: number;
+  overallScore: number;
+  financialRisk: 'low' | 'medium' | 'high';
+  operationalRisk: 'low' | 'medium' | 'high';
+  complianceRisk: 'low' | 'medium' | 'high';
+  lastAssessed: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -907,6 +916,9 @@ export interface PurchaseOrderItem {
   lineTotal: number;
   receivedQuantity: number;
   sortOrder: number;
+  serialNumber?: string | null;
+  model?: string | null;
+  manufacturer?: string | null;
 }
 
 export interface PurchaseOrderInput {
@@ -916,7 +928,7 @@ export interface PurchaseOrderInput {
   orderDate?: string;
   expectedDelivery?: string | null;
   notes?: string | null;
-  items?: Array<{ productReference?: string | null; description: string; quantity: number; unitPrice: number }>;
+  items?: Array<{ productReference?: string | null; description: string; quantity: number; unitPrice: number; serialNumber?: string | null; model?: string | null; manufacturer?: string | null }>;
 }
 
 

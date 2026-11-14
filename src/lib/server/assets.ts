@@ -93,7 +93,7 @@ function hydrate(r: AssetRow): Asset {
   };
 }
 
-export function listAssets(filters: { search?: string; status?: string; businessReference?: string; limit?: number; page?: number } = {}): Asset[] {
+export function listAssets(filters: { search?: string; status?: string; businessReference?: string; vendorReference?: string; limit?: number; page?: number } = {}): Asset[] {
   const conds: string[] = [];
   const params: unknown[] = [];
   if (filters.search) {
@@ -103,12 +103,17 @@ export function listAssets(filters: { search?: string; status?: string; business
   }
   if (filters.status) { conds.push('a.status = ?'); params.push(filters.status); }
   if (filters.businessReference) { conds.push('a.business_reference = ?'); params.push(filters.businessReference); }
+  if (filters.vendorReference) { conds.push('a.vendor_reference = ?'); params.push(filters.vendorReference); }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   const page = filters.page && filters.page > 0 ? filters.page : 1;
   const limit = filters.limit ? Number(filters.limit) : 10;
   const offset = (page - 1) * limit;
   const rows = db.prepare(`SELECT a.*, c.name AS category_name, p.name AS assigned_to_name, b.name AS business_name FROM assets a LEFT JOIN asset_categories c ON c.id = a.category_id LEFT JOIN people p ON p.id = a.assigned_to LEFT JOIN customers b ON b.reference = a.business_reference ${where} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as AssetRow[];
   return rows.map(hydrate);
+}
+
+export function listAssetsByVendor(vendorReference: string): Asset[] {
+  return listAssets({ vendorReference, limit: 1000 });
 }
 
 export function getAssetByIdOrRef(idOrRef: string): Asset | null {
@@ -367,7 +372,7 @@ export function calculateAllDepreciation(): { processed: number; totalDepreciati
       processed++;
       totalDepreciation += dep;
     } catch (e) {
-      errors.push(`Asset ${asset.reference}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      errors.push(`Asset ${assetRow.reference}: ${e instanceof Error ? e.message : 'Unknown error'}`);
     }
   }
   
