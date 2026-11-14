@@ -444,6 +444,84 @@ export async function listAssetCategories() {
   return { categories };
 }
 
+export async function calculateAssetDepreciation(reference: string) {
+  const user = await getUserRequest();
+  if (!user || !hasPermission(user.role, 'assets:write')) {
+    throw new Error('Forbidden');
+  }
+
+  const { calculateMonthlyDepreciation: calculateDep } = await import('@/lib/server/assets');
+  const asset = await db.select().from(assets).where(eq(assets.reference, reference)).limit(1);
+  if (!asset[0]) throw new Error('Asset not found');
+
+  const monthlyDepreciation = calculateDep({
+    id: asset[0].id,
+    reference: asset[0].reference,
+    name: asset[0].name,
+    status: asset[0].status,
+    purchasePrice: asset[0].purchasePrice,
+    currency: asset[0].currency,
+    depreciationRate: asset[0].depreciationRate,
+    depreciationMethod: asset[0].depreciationMethod,
+    accumulatedDepreciation: asset[0].accumulatedDepreciation,
+    bookValue: asset[0].bookValue,
+  } as any);
+
+  const newAccumulated = (asset[0].accumulatedDepreciation || 0) + monthlyDepreciation;
+  const newBookValue = Math.max(0, asset[0].purchasePrice - newAccumulated);
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(assets)
+      .set({
+        accumulatedDepreciation: newAccumulated,
+        bookValue: newBookValue,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(assets.reference, reference));
+
+    // Create depreciation expense
+    const expenseRef = await generateReference('EXP');
+    await tx.insert(expenses).values({
+      reference: expenseRef,
+      title: `Depreciation: ${asset[0].name}`,
+      category: 'asset_depreciation',
+      amount: monthlyDepreciation,
+      currency: asset[0].currency,
+      status: 'paid',
+      expenseDate: new Date().toISOString().slice(0, 10),
+      vendorReference: null,
+      assetReference: asset[0].reference,
+      assetCategory: 'depreciation',
+      isAssetPurchase: false,
+      notes: `Monthly depreciation (${asset[0].depreciationRate}%/yr, ${asset[0].depreciationMethod})`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  revalidatePath('/assets', 'page');
+  revalidatePath(`/assets/${reference}`);
+  revalidateTag('assets', 'page');
+
+  return { monthlyDepreciation, newAccumulated, newBookValue };
+}
+
+export async function calculateAllAssetDepreciation() {
+  const user = await getUserRequest();
+  if (!user || !hasPermission(user.role, 'assets:write')) {
+    throw new Error('Forbidden');
+  }
+
+  const { calculateAllDepreciation: calculateAllDep } = await import('@/lib/server/assets');
+  const result = calculateAllDep();
+
+  revalidatePath('/assets', 'page');
+  revalidateTag('assets', 'page');
+
+  return result;
+}
+
 async function getUserRequest() {
   return { id: 1, name: 'System', role: 'admin', team: null };
 }
